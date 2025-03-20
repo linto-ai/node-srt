@@ -1,42 +1,59 @@
+const { SRT } = require('../build/Release/node_srt.node');
+
 const READ_BUF_SIZE = 16 * 1024;
 
 /**
- * Will read at least max number of bytes from SRT socket in async loop.
+ * Reads at least `minBytesRead` bytes asynchronously from an SRT socket.
  *
- * Returns Promise of array of buffers.
- *
- * @param {AsyncSRT} asyncSrt
- * @param {number} socketFd
- * @param {number} minBytesRead
- * @param {Function} onRead
- * @param {Function} onError
- * @returns {Promise<Uint8Array[]>}
+ * @param {AsyncSRT} asyncSrt - Instance of asynchronous SRT socket
+ * @param {number} socketFd - Socket file descriptor
+ * @param {number} minBytesRead - Minimum number of bytes to read
+ * @param {number} [readBufSize=READ_BUF_SIZE] - Buffer size for reading
+ * @param {Function} [onRead=null] - Callback invoked after each successful read
+ * @param {Function} [onError=null] - Callback invoked upon error
+ * @returns {Promise<Uint8Array[]>} - Array of read chunks
  */
-async function readChunks(asyncSrt, socketFd, minBytesRead, readBufSize = READ_BUF_SIZE,
-  onRead = null, onError = null) {
+async function readChunks(
+  asyncSrt,
+  socketFd,
+  minBytesRead,
+  readBufSize = READ_BUF_SIZE,
+  onRead = null,
+  onError = null
+) {
   let bytesRead = 0;
   const chunks = [];
+
   while (bytesRead < minBytesRead) {
-    const readReturn = await asyncSrt.read(socketFd, readBufSize);
-    if (readReturn instanceof Uint8Array) {
-      const readBuf = readReturn;
-      bytesRead += readBuf.byteLength;
-      if (onRead) {
-        onRead(readBuf);
+    try {
+      const readBuf = await asyncSrt.read(socketFd, readBufSize);
+
+      if (readBuf instanceof Uint8Array && readBuf.byteLength > 0) {
+        bytesRead += readBuf.byteLength;
+        chunks.push(readBuf);
+        if (typeof onRead === 'function') {
+          onRead(readBuf);
+        }
+      } else if (readBuf === null || readBuf === SRT.ERROR) {
+        if (typeof onError === 'function') {
+          onError(readBuf);
+        }
+        throw new Error(`SRT read error: ${readBuf}`);
+      } else {
+        throw new Error('Unexpected read result from asyncSrt');
       }
-      chunks.push(readBuf);
-    } else if (result === SRT.ERROR || result === null) {
-      if (onError) {
-        onError(result);
+    } catch (err) {
+      if (typeof onError === 'function') {
+        onError(err);
       }
-    } else {
-      throw new Error('Got unexpected read-result')
+      throw err;
     }
   }
+
   return chunks;
 }
 
 module.exports = {
   READ_BUF_SIZE,
-  readChunks
-}
+  readChunks,
+};
