@@ -153,6 +153,7 @@ class SRTServer extends EventEmitter {
     this.epid = null;
 
     this._pollEventsTimer = null;
+    this._accepting = false;
     this._asyncSrt = new AsyncSRT();
     this._connectionMap = {};
   }
@@ -303,7 +304,18 @@ class SRTServer extends EventEmitter {
   async _pollEvents() {
     const events = await this._asyncSrt.epollUWait(this.epid, EPOLLUWAIT_TIMEOUT_MS);
     events.forEach((event) => {
-      this._handleEvent(event);
+      if (event.socket !== this.socket) {
+        this._handleEvent(event);
+        return;
+      }
+      // The listener stays readable until the queued connection is accepted,
+      // so a later poll can report it again. A second accept would find the
+      // queue empty and block the worker thread shared by every connection.
+      if (this._accepting) return;
+      this._accepting = true;
+      this._handleEvent(event).finally(() => {
+        this._accepting = false;
+      });
     });
 
     // clearing in case we get called multiple times
